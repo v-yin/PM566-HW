@@ -1,0 +1,98 @@
+---
+title: "HW01: PM2.5 concentration in California 2004 vs 2019"
+author: "VY"
+date: "`r Sys.Date()`"
+output: github_document
+always_allow_html: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+webshot::install_phantomjs()
+library(leaflet)
+
+library(webshot)
+
+library(dplyr)
+
+library(data.table)
+
+library(tidyverse)
+```
+
+#Upload 2004 and 2019 datasets and look at data
+```{r upload}
+data04 <- read.csv(file = "/Users/victoriayin/Downloads/ad_viz_plotval_data.csv")
+dim(data04)
+head(data04)
+tail(data04)
+str(data04)
+
+data19 <- read.csv(file = "/Users/victoriayin/Downloads/ad_viz_plotval_data (1).csv")
+dim(data19)
+head(data19)
+tail(data19)
+str(data19)
+```
+There do not appear to be any data issues at first glance. Each dataset contains the same 20 variables. There were 19233 observations in 2004 and 53156 observations in 2019.
+
+#Merge datasets
+```{r merge}
+alldata <- bind_rows(data04, data19, .id= "id")
+alldata <- alldata %>%
+            mutate(id = recode(id, "1" = "2004", "2" = "2019"))
+alldata <- data.table(alldata)
+alldata %>% mutate(year = ifelse(id==1, "2004", "2019"))
+```
+
+#Add date column for identification and change names of columns (for easier reference)
+```{r date}
+alldata <- alldata[ , dateclean := as.Date(as.character(Date), "%m/%d/%Y")]
+
+alldata1 <- rename (alldata, PM2.5 = Daily.Mean.PM2.5.Concentration, lat = SITE_LATITUDE, lng = SITE_LONGITUDE, AQI = DAILY_AQI_VALUE)
+```
+#Create a basic map in leaflet() that shows the locations of the sites (make sure to use different colors for each year). Summarize the spatial distribution of the monitoring sites.
+```{r spatial map}
+site.pal <- colorFactor("RdYlBu", domain=alldata1$id)
+site.pal
+sitemap <- leaflet(alldata1) %>%
+  addProviderTiles('CartoDB.Positron') %>%
+  addCircles(
+    lng =~lng, lat =~lat,
+     color = ~site.pal(alldata1$id),
+     fillOpacity = 0.5, radius = 500
+  ) %>%
+  addLegend('bottomleft', pal=site.pal, values=~alldata1$id, title = "Spatial map of site location by year", opacity=1, labels = c("2004", "2009"))
+sitemap
+```
+It appears that a lot more sites were added all over California, especially central California. There are highest density of sites around LA and SF.
+
+#Check for any missing or implausible values of PM2.5 in the combined dataset. Explore the proportions of each and provide a summary of any temporal patterns you see in these observations.
+```{r examining PM2.5 data}
+summary(alldata1$PM2.5)
+alldata2 <- alldata1[order(PM2.5)]
+head(alldata2)
+tail(alldata2)
+alldata1 <- alldata1[PM2.5>0]
+sum04 <- alldata1[id=="2004", PM2.5] %>% summary(PM2.5)
+sum04
+sum19 <- alldata1[id=="2019", PM2.5] %>% summary(PM2.5)
+sum19
+```
+There were negative values (deleted). Max was 251. It does seem like 251 is a feasible measurement https://www.airnow.gov/aqi/aqi-basics/extremely-high-levels-of-pm25/ https://www.sfgate.com/bayarea/article/CALIFORNIA-Yosemite-fire-spreads-shuts-trails-2741685.php
+It appears that PM2.5 levels were lower in 2019 than in 2004. The 1st quartile, median, mean, 3rd quartile, and max PM2.5 levels were all lower in 2019 when compared to 2004.
+
+#Explore the main question of interest at three different spatial levels (state, county, Los Angeles). Create exploratory plots (e.g. boxplots, histograms, line plots) and summary statistics that best suit each level of data. Be sure to write up explanations of what you observe in these data.
+```{r changes in PM2.5 at 3 levels}
+histostate <- ggplot(alldata1, aes(x=PM2.5, color=id)) +
+  geom_histogram(binwidth=0.1, fill="white", position="dodge") +
+  theme(legend.position="right")
+histostate
+histocounty <- ggplot(alldata1, aes(x=PM2.5, color=id)) +
+  geom_histogram(binwidth=5, fill="white", position="dodge") +
+  theme(legend.position="right") +
+  facet_wrap(~COUNTY, ncol=5)
+histocounty
+
+```
+
