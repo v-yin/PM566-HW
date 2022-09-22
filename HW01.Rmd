@@ -20,15 +20,17 @@ library(data.table)
 library(tidyverse)
 ```
 
-#Upload 2004 and 2019 datasets and look at data
+# Upload 2004 and 2019 datasets and look at data
 ```{r upload}
 data04 <- read.csv(file = "/Users/victoriayin/Downloads/ad_viz_plotval_data.csv")
+data04 <- data.table(data04)
 dim(data04)
 head(data04)
 tail(data04)
 str(data04)
 
 data19 <- read.csv(file = "/Users/victoriayin/Downloads/ad_viz_plotval_data (1).csv")
+data19 <- data.table(data19)
 dim(data19)
 head(data19)
 tail(data19)
@@ -36,22 +38,22 @@ str(data19)
 ```
 There do not appear to be any data issues at first glance. Each dataset contains the same 20 variables. There were 19233 observations in 2004 and 53156 observations in 2019.
 
-#Merge datasets
+# Merge datasets
 ```{r merge}
 alldata <- bind_rows(data04, data19, .id= "id")
 alldata <- alldata %>%
             mutate(id = recode(id, "1" = "2004", "2" = "2019"))
-alldata <- data.table(alldata)
-alldata %>% mutate(year = ifelse(id==1, "2004", "2019"))
 ```
 
-#Add date column for identification and change names of columns (for easier reference)
+# Add date column for identification and change names of columns (for easier reference)
 ```{r date}
 alldata <- alldata[ , dateclean := as.Date(as.character(Date), "%m/%d/%Y")]
 
 alldata1 <- rename (alldata, PM2.5 = Daily.Mean.PM2.5.Concentration, lat = SITE_LATITUDE, lng = SITE_LONGITUDE, AQI = DAILY_AQI_VALUE)
+head(alldata1)
 ```
-#Create a basic map in leaflet() that shows the locations of the sites (make sure to use different colors for each year). Summarize the spatial distribution of the monitoring sites.
+
+# Create a basic map in leaflet() that shows the locations of the sites (make sure to use different colors for each year). Summarize the spatial distribution of the monitoring sites.
 ```{r spatial map}
 site.pal <- colorFactor("RdYlBu", domain=alldata1$id)
 site.pal
@@ -67,32 +69,68 @@ sitemap
 ```
 It appears that a lot more sites were added all over California, especially central California. There are highest density of sites around LA and SF.
 
-#Check for any missing or implausible values of PM2.5 in the combined dataset. Explore the proportions of each and provide a summary of any temporal patterns you see in these observations.
+# Check for any missing or implausible values of PM2.5 in the combined dataset (ie incomplete county data). Explore the proportions of each and provide a summary of any temporal patterns you see in these observations.
 ```{r examining PM2.5 data}
 summary(alldata1$PM2.5)
+ggplot(alldata1, aes(x=PM2.5)) + geom_histogram(binwidth=0.1)
 alldata2 <- alldata1[order(PM2.5)]
 head(alldata2)
 tail(alldata2)
+alldata1[PM2.5<0] %>% nrow()
+alldata1[is.na(PM2.5)] %>% nrow()
+alldata1[is.na(COUNTY)] %>% nrow()
+alldata1[is.na(Site.ID)] %>% nrow()
+alldata1[is.na(Site.Name)] %>% nrow()
 alldata1 <- alldata1[PM2.5>0]
 sum04 <- alldata1[id=="2004", PM2.5] %>% summary(PM2.5)
-sum04
 sum19 <- alldata1[id=="2019", PM2.5] %>% summary(PM2.5)
-sum19
+summary <- bind_rows(sum04, sum19, .id = "year")
+summary
 ```
-There were negative values (deleted). Max was 251. It does seem like 251 is a feasible measurement https://www.airnow.gov/aqi/aqi-basics/extremely-high-levels-of-pm25/ https://www.sfgate.com/bayarea/article/CALIFORNIA-Yosemite-fire-spreads-shuts-trails-2741685.php
-It appears that PM2.5 levels were lower in 2019 than in 2004. The 1st quartile, median, mean, 3rd quartile, and max PM2.5 levels were all lower in 2019 when compared to 2004.
+No data on county were missing. One Site.Name is missing for LA County (but not NA), however correlates with a single Site.ID (60371601) so it does not cause inaccuracies in the data analysis. There were negative values comprising 283(0.4%) of the overall data (deleted). For PM2.5, there were no NA values, no 9999 values, no weird modes (when looking at the histogram below), but there is a large positive skew. Max was 251. It does seem like 251 is a feasible measurement, considering there was a fire in that region that day. https://www.airnow.gov/aqi/aqi-basics/extremely-high-levels-of-pm25/ https://www.sfgate.com/bayarea/article/CALIFORNIA-Yosemite-fire-spreads-shuts-trails-2741685.php
 
-#Explore the main question of interest at three different spatial levels (state, county, Los Angeles). Create exploratory plots (e.g. boxplots, histograms, line plots) and summary statistics that best suit each level of data. Be sure to write up explanations of what you observe in these data.
+# Explore the main question of interest at three different spatial levels (state, county, Los Angeles). Create exploratory plots (e.g. boxplots, histograms, line plots) and summary statistics that best suit each level of data. Be sure to write up explanations of what you observe in these data.
 ```{r changes in PM2.5 at 3 levels}
 histostate <- ggplot(alldata1, aes(x=PM2.5, color=id)) +
   geom_histogram(binwidth=0.1, fill="white", position="dodge") +
   theme(legend.position="right")
 histostate
-histocounty <- ggplot(alldata1, aes(x=PM2.5, color=id)) +
-  geom_histogram(binwidth=5, fill="white", position="dodge") +
-  theme(legend.position="right") +
-  facet_wrap(~COUNTY, ncol=5)
-histocounty
 
+county_averages <- 
+  alldata1[ , 
+    countyPM2.5 := mean(PM2.5, na.rm=T),
+   by = c("COUNTY", "id")]
+ggplot(data=county_averages, aes(x=id, y=countyPM2.5, group=COUNTY, color=COUNTY)) +
+  geom_line()+
+  geom_point() +
+  theme(legend.position="right")
+countymeanyear <- county_averages[ , c("id", "COUNTY", "countyPM2.5")]
+
+countymeanyear1 <- countymeanyear[!duplicated(countyPM2.5)]
+countymeanyear1.wide <- pivot_wider(countymeanyear1, names_from = COUNTY, values_from = countyPM2.5) 
+countymeanyear1.wide
+
+LA_averages <-
+  alldata1[COUNTY=="Los Angeles"]
+LA_averages <- LA_averages[ , meanPM2.5 := mean(PM2.5, na.rm=T), by = c("Site.ID", "id")]
+ggplot(data=LA_averages, aes(x=id, y=meanPM2.5, group=Site.ID, color=Site.Name)) +
+  geom_line()+
+  geom_point() 
+ 
+LAmeanyear <- LA_averages[ , c("id", "Site.ID", "Site.Name", "meanPM2.5")]
+LAmeanyear <- LAmeanyear[!duplicated(meanPM2.5)]
+LAmeanyear.wide <- pivot_wider(LAmeanyear, names_from = "id", values_from = meanPM2.5)
+LAmeanyear.wide
 ```
 
+# Observations
+## State Level
+It appears that PM2.5 levels were lower in 2019 than in 2004. The 1st quartile, median, mean, 3rd quartile, and max PM2.5 levels were all lower in 2019 when compared to 2004. The histogram shows that the distribution of PM2.5 levels in 2004 was more right-shifted than the distribution of PM2.5 in 2019.
+
+
+## County Level
+The line plot shows that the majority of counties experienced a decrease in PM2.5 levels from 2004 to 2019. Looking at the table of the mean PM2.5 by county and year, it appears only the counties of Del Norte, Inyo, Marin, Mono, San Benito, Siskiyou, and Trinity experienced an increase in average PM2.5 levels, however most of these increases were relatively small. 2004 data from Glenn and Madera counties were missing, therefore a comparison could not be made between 2004 and 2019.
+
+
+## Los Angeles Level
+While many sites were missing data from both 2004 and 2019, all sites with complete information in LA county experienced a decrease in mean PM2.5 in 2019 vs 2004. The line plot also reflects this, and the new sites appear to have relatively lower levels of PM2.5 than most sites in 2004.
